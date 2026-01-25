@@ -689,7 +689,7 @@ if events_df is not None and len(events_df) > 0:
                     ),
                     text=p['display_name'],
                     textposition=text_pos,
-                    textfont=dict(size=8, color='white', family='Arial'),
+                    textfont=dict(size=8, color='black', family='Arial'),
                     hovertext=f"{p['name']}<br>#{p['jersey']}<br>{p['position']}<br>Passes: {p['passes']}<br>Avg Position: ({p['x']:.1f}, {p['y']:.1f})",
                     hoverinfo='text',
                     showlegend=False,
