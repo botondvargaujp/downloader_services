@@ -503,32 +503,11 @@ for i, metric_info in enumerate(all_metrics):
     # Alternate row background
     row_bg = "#F8F9FA" if i % 2 == 1 else "white"
     
-    html_rows += f"""
-    <tr style="background: {row_bg};">
-        <td style="text-align: right; padding: 6px 10px; font-size: 0.85em;">{home_value}</td>
-        <td style="text-align: center; padding: 6px 10px; font-size: 0.85em; font-weight: 500;">{metric_name}</td>
-        <td style="text-align: left; padding: 6px 10px; font-size: 0.85em;">{away_value}</td>
-    </tr>
-    """
+    html_rows += f'<tr style="background: {row_bg};"><td style="text-align: right; padding: 6px 10px; font-size: 0.85em;">{home_value}</td><td style="text-align: center; padding: 6px 10px; font-size: 0.85em; font-weight: 500;">{metric_name}</td><td style="text-align: left; padding: 6px 10px; font-size: 0.85em;">{away_value}</td></tr>'
 
 # Render single HTML table with all stats
-st.markdown(
-    f"""
-    <table style="width: 100%; border-collapse: collapse; border: 1px solid #ddd; margin-bottom: 5px;">
-        <thead>
-            <tr style="background: #f0f0f0;">
-                <th style="text-align: right; padding: 8px 10px; font-size: 0.8em; border-bottom: 2px solid #ddd;">{home_team} (vs avg)</th>
-                <th style="text-align: center; padding: 8px 10px; font-size: 0.8em; border-bottom: 2px solid #ddd;">Statistic</th>
-                <th style="text-align: left; padding: 8px 10px; font-size: 0.8em; border-bottom: 2px solid #ddd;">{away_team} (vs avg)</th>
-            </tr>
-        </thead>
-        <tbody>
-            {html_rows}
-        </tbody>
-    </table>
-    """,
-    unsafe_allow_html=True,
-)
+table_html = f'<table style="width: 100%; border-collapse: collapse; border: 1px solid #ddd; margin-bottom: 5px;"><thead><tr style="background: #f0f0f0;"><th style="text-align: right; padding: 8px 10px; font-size: 0.8em; border-bottom: 2px solid #ddd;">{home_team} (vs avg)</th><th style="text-align: center; padding: 8px 10px; font-size: 0.8em; border-bottom: 2px solid #ddd;">Statistic</th><th style="text-align: left; padding: 8px 10px; font-size: 0.8em; border-bottom: 2px solid #ddd;">{away_team} (vs avg)</th></tr></thead><tbody>{html_rows}</tbody></table>'
+st.markdown(table_html, unsafe_allow_html=True)
 
 st.markdown("<div style='margin: 10px 0;'></div>", unsafe_allow_html=True)
 
@@ -710,7 +689,7 @@ if events_df is not None and len(events_df) > 0:
                     ),
                     text=p['display_name'],
                     textposition=text_pos,
-                    textfont=dict(size=8, color='black', family='Arial'),
+                    textfont=dict(size=8, color='white', family='Arial'),
                     hovertext=f"{p['name']}<br>#{p['jersey']}<br>{p['position']}<br>Passes: {p['passes']}<br>Avg Position: ({p['x']:.1f}, {p['y']:.1f})",
                     hoverinfo='text',
                     showlegend=False,
