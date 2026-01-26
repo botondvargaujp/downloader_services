@@ -107,7 +107,7 @@ def parse_starting_xi(events_df):
     return starting_xi_data
 
 def calculate_player_average_positions(events_df, team_name, starting_xi_players):
-    """Calculate average pass locations for starting XI players and pass connections"""
+    """Calculate average pass locations for starting XI players, pass connections, and OBV"""
     import ast
     
     # Get list of starting XI player IDs
@@ -129,8 +129,9 @@ def calculate_player_average_positions(events_df, team_name, starting_xi_players
         player_passes = pass_events[pass_events['player_id'] == player_id]
         
         if len(player_passes) > 0:
-            # Parse location data
+            # Parse location data and calculate OBV
             locations = []
+            total_obv = 0.0
             for _, row in player_passes.iterrows():
                 loc_str = row['location']
                 if pd.notna(loc_str):
@@ -140,6 +141,11 @@ def calculate_player_average_positions(events_df, team_name, starting_xi_players
                             locations.append(loc)
                     except:
                         pass
+                
+                # Sum up OBV for this player's passes
+                obv_value = row.get('obv_total_net', 0)
+                if pd.notna(obv_value):
+                    total_obv += float(obv_value)
                 
                 # Track pass recipients for network
                 recipient_id = row.get('pass_recipient_id')
@@ -154,7 +160,8 @@ def calculate_player_average_positions(events_df, team_name, starting_xi_players
                 player_positions[player_name] = {
                     'x': avg_x,
                     'y': avg_y,
-                    'passes': len(locations)
+                    'passes': len(locations),
+                    'obv': total_obv
                 }
     
     return player_positions, pass_connections
@@ -610,6 +617,38 @@ if events_df is not None and len(events_df) > 0:
                                 showlegend=False
                             ))
             
+            # OBV color scale: red (negative) -> yellow (neutral) -> blue/green (positive)
+            # Based on typical OBV range: -0.05 to 0.23+
+            OBV_MIN = -0.05
+            OBV_MAX = 0.23
+            
+            def obv_to_color(obv_value):
+                """Map OBV value to color using red-yellow-green-blue gradient"""
+                # Normalize to 0-1 range
+                normalized = (obv_value - OBV_MIN) / (OBV_MAX - OBV_MIN)
+                normalized = max(0, min(1, normalized))  # Clamp to [0, 1]
+                
+                if normalized < 0.33:
+                    # Red to yellow (low OBV)
+                    t = normalized / 0.33
+                    r = int(220)
+                    g = int(50 + t * 150)
+                    b = int(50)
+                elif normalized < 0.66:
+                    # Yellow to green (medium OBV)
+                    t = (normalized - 0.33) / 0.33
+                    r = int(220 - t * 150)
+                    g = int(200)
+                    b = int(50 + t * 50)
+                else:
+                    # Green to blue (high OBV)
+                    t = (normalized - 0.66) / 0.34
+                    r = int(70 - t * 30)
+                    g = int(200 - t * 50)
+                    b = int(100 + t * 120)
+                
+                return f'rgb({r},{g},{b})'
+            
             # Plot players at their average positions
             # First, collect all player positions to detect clusters
             player_data = []
@@ -623,6 +662,7 @@ if events_df is not None and len(events_df) > 0:
                     x = pos_data['x']
                     y = pos_data['y']
                     num_passes = pos_data['passes']
+                    obv = pos_data.get('obv', 0)
                     
                     # Use only last name
                     name_parts = player_name.split()
@@ -638,7 +678,8 @@ if events_df is not None and len(events_df) > 0:
                         'jersey': jersey,
                         'position': position_name,
                         'passes': num_passes,
-                        'marker_size': marker_size
+                        'marker_size': marker_size,
+                        'obv': obv
                     })
             
             # Available text positions in order of preference
@@ -674,32 +715,66 @@ if events_df is not None and len(events_df) > 0:
                     pos_index = my_index % len(text_positions)
                     assigned_positions[p1['display_name']] = text_positions[pos_index]
             
-            # Plot players with their assigned text positions
+            # Plot players with their assigned text positions and OBV-based colors
             for p in player_data:
                 text_pos = assigned_positions.get(p['display_name'], 'top center')
+                marker_color = obv_to_color(p['obv'])
                 
                 fig.add_trace(go.Scatter(
                     x=[p['y']], y=[p['x']],
                     mode='markers+text',
                     marker=dict(
                         size=p['marker_size'], 
-                        color=team_color, 
+                        color=marker_color, 
                         line=dict(width=2, color='white'),
                         opacity=0.9
                     ),
                     text=p['display_name'],
                     textposition=text_pos,
                     textfont=dict(size=8, color='black', family='Arial'),
-                    hovertext=f"{p['name']}<br>#{p['jersey']}<br>{p['position']}<br>Passes: {p['passes']}<br>Avg Position: ({p['x']:.1f}, {p['y']:.1f})",
+                    hovertext=f"{p['name']}<br>#{p['jersey']}<br>{p['position']}<br>Passes: {p['passes']}<br>OBV: {p['obv']:.3f}<br>Avg Position: ({p['x']:.1f}, {p['y']:.1f})",
                     hoverinfo='text',
                     showlegend=False,
                     cliponaxis=False
                 ))
             
+            # Add a dummy trace for the colorbar legend
+            # Create gradient values for colorbar
+            colorbar_values = [OBV_MIN + (OBV_MAX - OBV_MIN) * i / 10 for i in range(11)]
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None],
+                mode='markers',
+                marker=dict(
+                    size=0.1,
+                    color=[OBV_MIN],
+                    colorscale=[
+                        [0, 'rgb(220,50,50)'],      # Red (negative OBV)
+                        [0.33, 'rgb(220,200,50)'],  # Yellow (low OBV)
+                        [0.66, 'rgb(70,200,100)'],  # Green (medium OBV)
+                        [1, 'rgb(40,150,220)']      # Blue (high OBV)
+                    ],
+                    cmin=OBV_MIN,
+                    cmax=OBV_MAX,
+                    colorbar=dict(
+                        title=dict(text='OBV', font=dict(size=10), side='top'),
+                        tickvals=[OBV_MIN, 0, 0.1, OBV_MAX],
+                        ticktext=[f'{OBV_MIN}', '0', '0.1', f'{OBV_MAX}+'],
+                        tickfont=dict(size=8),
+                        len=0.4,
+                        thickness=12,
+                        x=1.02,
+                        y=0.5,
+                    ),
+                    showscale=True
+                ),
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+            
             # Update layout
             fig.update_layout(
                 title=dict(
-                    text=f"{team_name}, Starting Eleven<br><sub>Formation: {formation} | Pass network & average positions</sub>",
+                    text=f"{team_name}, Starting Eleven<br><sub>Formation: {formation} | Pass network & OBV coloring</sub>",
                     font=dict(size=14, color=team_color),
                     x=0.5,
                     xanchor='center'
@@ -709,7 +784,7 @@ if events_df is not None and len(events_df) > 0:
                 plot_bgcolor='rgba(144, 238, 144, 0.3)',  # Light green for pitch
                 paper_bgcolor='white',
                 height=600,
-                margin=dict(l=20, r=20, t=60, b=20),
+                margin=dict(l=20, r=60, t=60, b=20),
                 uniformtext=dict(mode='hide', minsize=6)
             )
             
@@ -733,6 +808,40 @@ if events_df is not None and len(events_df) > 0:
             )
             fig2 = create_pass_map_plot(teams_list[1], starting_xi[teams_list[1]], team2_color, avg_pos_team2, pass_conn_team2)
             st.plotly_chart(fig2, use_container_width=True)
+        
+        # Add legend explanation below the pass maps
+        st.markdown(
+            """
+            <div style="display: flex; justify-content: center; gap: 40px; padding: 10px; background: #f8f9fa; border-radius: 8px; margin: 5px 0; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #888;"></span>
+                        <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #888;"></span>
+                        <span style="display: inline-block; width: 18px; height: 18px; border-radius: 50%; background: #888;"></span>
+                    </div>
+                    <span style="font-size: 0.75em; color: #555;">1 → 100+ passes</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <span style="display: inline-block; width: 20px; height: 1px; background: #888;"></span>
+                        <span style="display: inline-block; width: 20px; height: 3px; background: #888;"></span>
+                        <span style="display: inline-block; width: 20px; height: 6px; background: #888;"></span>
+                    </div>
+                    <span style="font-size: 0.75em; color: #555;">2 → 40+ passes</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: rgb(220,50,50); border: 1px solid #ccc;"></span>
+                        <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: rgb(220,200,50); border: 1px solid #ccc;"></span>
+                        <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: rgb(70,200,100); border: 1px solid #ccc;"></span>
+                        <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: rgb(40,150,220); border: 1px solid #ccc;"></span>
+                    </div>
+                    <span style="font-size: 0.75em; color: #555;">-0.05 → 0.23+ OBV</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
     else:
         st.info("Starting lineup data not available for this match.")
 else:
