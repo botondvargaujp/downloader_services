@@ -41,18 +41,25 @@ def load_data():
     matches_path = os.path.join(os.path.dirname(__file__), "matches", "*", "team_match_stats.csv")
     csv_files = glob.glob(matches_path)
     
+    # Sort files to ensure consistent ordering
+    csv_files.sort()
+    
     # Load and combine all CSV files
     dfs = []
     for file in csv_files:
         df_temp = pd.read_csv(file)
-        # Extract match date from folder name
+        # The match_date column should already exist in the CSV
+        # But we'll ensure it's set from the folder name for consistency
         match_date = os.path.basename(os.path.dirname(file))
         df_temp['match_date'] = match_date
         dfs.append(df_temp)
     
     # Combine all dataframes
     if dfs:
-        return pd.concat(dfs, ignore_index=True)
+        combined_df = pd.concat(dfs, ignore_index=True)
+        # Ensure match_date is unique per match
+        print(f"Loaded {len(combined_df)} rows from {combined_df['match_date'].nunique()} unique matches")
+        return combined_df
     else:
         st.error("No match data files found in matches/ folder")
         return pd.DataFrame()
