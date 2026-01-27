@@ -674,42 +674,8 @@ if events_df is not None and len(events_df) > 0:
                         'obv': obv
                     })
             
-            # Available text positions in order of preference
-            text_positions = [
-                'top center', 'bottom center', 'middle left', 'middle right',
-                'top left', 'top right', 'bottom left', 'bottom right'
-            ]
-            
-            # For each player, find nearby players and assign unique text positions
-            assigned_positions = {}
-            
-            for i, p1 in enumerate(player_data):
-                # Find players in same area (cluster)
-                cluster = [p1]
-                for j, p2 in enumerate(player_data):
-                    if i != j:
-                        distance = ((p1['x'] - p2['x'])**2 + (p1['y'] - p2['y'])**2)**0.5
-                        if distance < 20:  # Within 20 units = same cluster
-                            cluster.append(p2)
-                
-                # Sort cluster by y position (left to right on pitch)
-                cluster.sort(key=lambda p: (p['x'], p['y']))
-                
-                # Find this player's index in the cluster
-                my_index = next(idx for idx, p in enumerate(cluster) if p['display_name'] == p1['display_name'])
-                
-                # Assign text position based on cluster position
-                if len(cluster) == 1:
-                    # Isolated player - use top center
-                    assigned_positions[p1['display_name']] = 'top center'
-                else:
-                    # In a cluster - distribute positions
-                    pos_index = my_index % len(text_positions)
-                    assigned_positions[p1['display_name']] = text_positions[pos_index]
-            
             # Plot players with their assigned text positions and OBV-based colors
             for p in player_data:
-                text_pos = assigned_positions.get(p['display_name'], 'top center')
                 marker_color = obv_to_color(p['obv'])
                 
                 fig.add_trace(go.Scatter(
@@ -722,8 +688,8 @@ if events_df is not None and len(events_df) > 0:
                         opacity=0.9
                     ),
                     text=p['display_name'],
-                    textposition=text_pos,
-                    textfont=dict(size=8, color='black', family='Arial'),
+                    textposition='middle center',  # Place text exactly on the circle
+                    textfont=dict(size=8, color='black', family='Arial', weight='bold'),  # Black bold text
                     hovertext=f"{p['name']}<br>#{p['jersey']}<br>{p['position']}<br>Passes: {p['passes']}<br>OBV: {p['obv']:.3f}<br>Avg Position: ({p['x']:.1f}, {p['y']:.1f})",
                     hoverinfo='text',
                     showlegend=False,
