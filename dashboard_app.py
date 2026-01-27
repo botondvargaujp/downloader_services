@@ -36,22 +36,25 @@ BACKGROUND_LIGHT = "#F8F9FA"
 # -------------------------
 @st.cache_data
 def load_data():
-    """Load all match stats from the match_data folder"""
-    # Get all stats_*.csv files from match_data folder
-    data_path = os.path.join(os.path.dirname(__file__), "match_data", "stats_*.csv")
-    csv_files = glob.glob(data_path)
+    """Load all match stats from the matches folder"""
+    # Get all team_match_stats.csv files from matches subfolders
+    matches_path = os.path.join(os.path.dirname(__file__), "matches", "*", "team_match_stats.csv")
+    csv_files = glob.glob(matches_path)
     
     # Load and combine all CSV files
     dfs = []
     for file in csv_files:
         df_temp = pd.read_csv(file)
+        # Extract match date from folder name
+        match_date = os.path.basename(os.path.dirname(file))
+        df_temp['match_date'] = match_date
         dfs.append(df_temp)
     
     # Combine all dataframes
     if dfs:
         return pd.concat(dfs, ignore_index=True)
     else:
-        st.error("No match data files found in match_data/ folder")
+        st.error("No match data files found in matches/ folder")
         return pd.DataFrame()
 
 @st.cache_data
@@ -69,9 +72,9 @@ def load_team_season_stats():
         return pd.DataFrame()
 
 @st.cache_data
-def load_events_data(match_id):
-    """Load event data for a specific match"""
-    events_path = os.path.join(os.path.dirname(__file__), "match_data", f"events_{match_id}.csv")
+def load_events_data(match_date):
+    """Load event data for a specific match date"""
+    events_path = os.path.join(os.path.dirname(__file__), "matches", match_date, "events.csv")
     if os.path.exists(events_path):
         df_events = pd.read_csv(events_path)
         # Sort by period, minute, second
@@ -227,7 +230,7 @@ def get_season_avg(team_name, match_col):
 # -------------------------
 # CREATE MATCH OPTIONS
 # -------------------------
-def format_match_option(match_df, match_dates):
+def format_match_option(match_df):
     """Format match as 'Home Team vs Away Team - Date'"""
     # Sort by team_id to ensure consistent ordering (lower team_id = home team)
     match_df_sorted = match_df.sort_values('team_id')
@@ -240,37 +243,34 @@ def format_match_option(match_df, match_dates):
         home_team = teams[0]
         away_team = "TBD"
     
-    match_id = match_df["match_id"].iloc[0]
+    match_date = match_df["match_date"].iloc[0]
     
-    # Get match date if available
+    # Format date nicely (e.g., "Jan 25, 2026")
     match_date_str = ""
-    if match_id in match_dates:
-        match_date = match_dates[match_id]
-        # Format date nicely (e.g., "Jan 25, 2026")
-        try:
-            date_obj = pd.to_datetime(match_date)
-            match_date_str = f" - {date_obj.strftime('%b %d, %Y')}"
-        except:
-            match_date_str = f" - {match_date}"
+    try:
+        date_obj = pd.to_datetime(match_date)
+        match_date_str = f" - {date_obj.strftime('%b %d, %Y')}"
+    except:
+        match_date_str = f" - {match_date}"
     
-    return f"{home_team} vs {away_team}{match_date_str}", match_id
+    return f"{home_team} vs {away_team}{match_date_str}", match_date
 
 # Create match options
 match_options = {}
-for match_id in df["match_id"].unique():
-    match_df = df[df["match_id"] == match_id]
-    label, mid = format_match_option(match_df, match_dates)
-    match_options[label] = mid
+for match_date in df["match_date"].unique():
+    match_df = df[df["match_date"] == match_date]
+    label, mdate = format_match_option(match_df)
+    match_options[label] = mdate
 
 # -------------------------
 # SIDEBAR - MATCH SELECTION
 # -------------------------
 st.sidebar.title("MATCH SELECTION")
 selected_match_label = st.sidebar.selectbox("Select Match", list(match_options.keys()))
-selected_match_id = match_options[selected_match_label]
+selected_match_date = match_options[selected_match_label]
 
 # Get match data - Home team always on left (lower team_id), Ujpest always purple
-match_df = df[df["match_id"] == selected_match_id]
+match_df = df[df["match_date"] == selected_match_date]
 match_df_sorted = match_df.sort_values('team_id')
 teams = match_df_sorted["team_name"].tolist()
 
@@ -290,31 +290,37 @@ is_home_ujpest = home_team == "Ujpest"
 is_away_ujpest = away_team == "Ujpest"
 
 # Load events data (needed for starting lineups and xG race chart)
-events_df = load_events_data(selected_match_id)
+events_df = load_events_data(selected_match_date)
 
 # -------------------------
 # METRICS TO COMPARE
 # -------------------------
-metrics = {
-    "Match Overview": [
-        ("Goals", "team_match_goals"),
-        ("xG", "team_match_np_xg"),
-        ("Shots", "team_match_np_shots"),
-        ("Possession %", "team_match_possession", True),
-        ("Pass Completion %", "team_match_passing_ratio", True),
-        ("Total Passes", "team_match_passes"),
-        ("Completed Passes", "team_match_successful_passes"),
-    ],
-    "Pressing & Defense": [
-        ("Pressures", "team_match_pressures"),
-        ("Counterpressures", "team_match_counterpressures"),
-        ("Pressure Regains", "team_match_pressure_regains"),
-        ("Defensive Action Regains", "team_match_defensive_action_regains"),
-    ],
-    "Discipline": [
-        ("Yellow Cards", "team_match_yellow_cards"),
-        ("Red Cards", "team_match_red_cards"),
-    ],
+# Tuple format: (Display Name, Column Name, Is Percentage?, Season Comparison Enabled?)
+# Season comparison is only enabled for Ujpest
+all_metrics = [
+    ("Goals", "team_match_goals", False, False),
+    ("xG (Non Penalty)", "team_match_np_xg", False, True),
+    ("xG Conceded", "team_match_np_xg_conceded", False, True),
+    ("Shots", "team_match_np_shots", False, True),
+    ("Touches in Opp. Box", "team_touches_in_opp_box", False, True),
+    ("Crosses into Box", "team_match_crosses_into_box", False, True),
+    ("Final 3rd Forward Passes", "team_match_f3_forward_passes", False, True),
+    ("Possession %", "team_match_possession", True, True),
+    ("Passes per Possession", "passes_per_possession", False, True),
+    ("PPDA", "team_match_ppda", False, True),
+]
+
+# Map match columns to season columns
+MATCH_TO_SEASON_STAT_MAP = {
+    "team_match_np_xg": "team_season_np_xg_pg",
+    "team_match_np_xg_conceded": "team_season_np_xg_conceded_pg",
+    "team_match_np_shots": "team_season_np_shots_pg",
+    "team_touches_in_opp_box": None,  # Not available in season stats
+    "team_match_crosses_into_box": "team_season_crosses_into_box_pg",
+    "team_match_f3_forward_passes": None,  # Not available in season stats
+    "team_match_possession": "team_season_possession",
+    "passes_per_possession": None,  # Calculated field
+    "team_match_ppda": "team_season_ppda",
 }
 
 # -------------------------
@@ -399,13 +405,14 @@ def format_value(value, is_percentage=False):
         return f"{value:.2f}"
     return str(int(value))
 
-def format_value_with_diff(value, season_avg, is_percentage=False, use_html=False, use_reportlab=False):
+def format_value_with_diff(value, season_avg, is_percentage=False, show_diff=True, use_html=False, use_reportlab=False):
     """Format values for display with difference from season average
     
     Args:
         value: The match value
         season_avg: The season average value
         is_percentage: Whether the value is a percentage
+        show_diff: Whether to show the difference (only True for Ujpest)
         use_html: If True, return HTML with color styling (for Streamlit)
         use_reportlab: If True, return ReportLab-compatible markup (for PDF)
     """
@@ -420,8 +427,14 @@ def format_value_with_diff(value, season_avg, is_percentage=False, use_html=Fals
     else:
         main_value = str(int(value))
     
-    # If no season average, return just the value
-    if season_avg is None or pd.isna(season_avg):
+    # Bold the value
+    if use_html:
+        main_value = f"<b>{main_value}</b>"
+    elif use_reportlab:
+        main_value = f"<b>{main_value}</b>"
+    
+    # If no season average or diff not requested, return just the value
+    if not show_diff or season_avg is None or pd.isna(season_avg):
         return main_value
     
     # Calculate the difference
@@ -436,7 +449,7 @@ def format_value_with_diff(value, season_avg, is_percentage=False, use_html=Fals
         diff_str = f"{diff:+.0f}"
     
     # Color code: green for positive (better), red for negative (worse)
-    # For most stats, higher is better
+    # For most stats, higher is better (except xG conceded and PPDA where lower is better)
     if diff > 0.001:  # Small threshold to avoid floating point issues
         color = "#28a745"  # Green - better than average
     elif diff < -0.001:
@@ -455,65 +468,44 @@ st.markdown(
     """
     <div style="text-align: center; margin-bottom: 5px;">
         <h3 style="color: #2C3E50; margin: 0; font-size: 1.1em;">Match Statistics</h3>
-        <p style="color: #7F8C8D; margin: 2px 0 0 0; font-size: 0.75em;">(±X) = difference vs season average per game</p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-# Custom CSS for compact tables and centered alignment
-st.markdown(
-    """
-    <style>
-    .stDataFrame {
-        font-size: 0.8em;
-    }
-    .stDataFrame td, .stDataFrame th {
-        padding: 2px 6px !important;
-        font-size: 0.8em;
-    }
-    /* Center-align the stat values - left column aligns right, right column aligns left */
-    .stDataFrame td:first-child {
-        text-align: right !important;
-    }
-    .stDataFrame td:last-child {
-        text-align: left !important;
-    }
-    .stDataFrame td:nth-child(2) {
-        text-align: center !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-# Create the comprehensive table with colored differences (all stats in one table)
-all_metrics = []
-for category, category_metrics in metrics.items():
-    all_metrics.extend(category_metrics)
-
 # Build HTML table with colored differences
 html_rows = ""
 for i, metric_info in enumerate(all_metrics):
-    metric_info_tuple = metric_info
-    metric_name = metric_info_tuple[0]
-    metric_col = metric_info_tuple[1]
-    is_percentage = len(metric_info_tuple) > 2 and metric_info_tuple[2]
+    metric_name = metric_info[0]
+    metric_col = metric_info[1]
+    is_percentage = metric_info[2]
+    show_season_comparison = metric_info[3]
     
-    # Get season averages for both teams
-    home_season_avg = get_season_avg(home_team, metric_col)
-    away_season_avg = get_season_avg(away_team, metric_col)
+    # Determine if we should show season comparison for each team
+    home_show_diff = show_season_comparison and is_home_ujpest
+    away_show_diff = show_season_comparison and is_away_ujpest
     
-    home_value = format_value_with_diff(row_home[metric_col], home_season_avg, is_percentage, use_html=True)
-    away_value = format_value_with_diff(row_away[metric_col], away_season_avg, is_percentage, use_html=True)
+    # Get season averages
+    home_season_avg = get_season_avg(home_team, metric_col) if home_show_diff else None
+    away_season_avg = get_season_avg(away_team, metric_col) if away_show_diff else None
+    
+    home_value = format_value_with_diff(row_home[metric_col], home_season_avg, is_percentage, show_diff=home_show_diff, use_html=True)
+    away_value = format_value_with_diff(row_away[metric_col], away_season_avg, is_percentage, show_diff=away_show_diff, use_html=True)
     
     # Alternate row background
     row_bg = "#F8F9FA" if i % 2 == 1 else "white"
     
-    html_rows += f'<tr style="background: {row_bg};"><td style="text-align: right; padding: 6px 10px; font-size: 0.85em;">{home_value}</td><td style="text-align: center; padding: 6px 10px; font-size: 0.85em; font-weight: 500;">{metric_name}</td><td style="text-align: left; padding: 6px 10px; font-size: 0.85em;">{away_value}</td></tr>'
+    # Bold the metric name
+    bold_metric_name = f"<b>{metric_name}</b>"
+    
+    html_rows += f'<tr style="background: {row_bg};"><td style="text-align: right; padding: 6px 10px; font-size: 0.85em;">{home_value}</td><td style="text-align: center; padding: 6px 10px; font-size: 0.85em;">{bold_metric_name}</td><td style="text-align: left; padding: 6px 10px; font-size: 0.85em;">{away_value}</td></tr>'
+
+# Update column headers based on which team is Ujpest
+home_header = f"{home_team}" + (" (vs avg)" if is_home_ujpest else "")
+away_header = f"{away_team}" + (" (vs avg)" if is_away_ujpest else "")
 
 # Render single HTML table with all stats
-table_html = f'<table style="width: 100%; border-collapse: collapse; border: 1px solid #ddd; margin-bottom: 5px;"><thead><tr style="background: #f0f0f0;"><th style="text-align: right; padding: 8px 10px; font-size: 0.8em; border-bottom: 2px solid #ddd;">{home_team} (vs avg)</th><th style="text-align: center; padding: 8px 10px; font-size: 0.8em; border-bottom: 2px solid #ddd;">Statistic</th><th style="text-align: left; padding: 8px 10px; font-size: 0.8em; border-bottom: 2px solid #ddd;">{away_team} (vs avg)</th></tr></thead><tbody>{html_rows}</tbody></table>'
+table_html = f'<table style="width: 100%; border-collapse: collapse; border: 1px solid #ddd; margin-bottom: 5px;"><thead><tr style="background: #f0f0f0;"><th style="text-align: right; padding: 8px 10px; font-size: 0.8em; border-bottom: 2px solid #ddd;">{home_header}</th><th style="text-align: center; padding: 8px 10px; font-size: 0.8em; border-bottom: 2px solid #ddd;">Statistic</th><th style="text-align: left; padding: 8px 10px; font-size: 0.8em; border-bottom: 2px solid #ddd;">{away_header}</th></tr></thead><tbody>{html_rows}</tbody></table>'
 st.markdown(table_html, unsafe_allow_html=True)
 
 st.markdown("<div style='margin: 10px 0;'></div>", unsafe_allow_html=True)
@@ -623,29 +615,29 @@ if events_df is not None and len(events_df) > 0:
             OBV_MAX = 0.23
             
             def obv_to_color(obv_value):
-                """Map OBV value to color using red-yellow-green-blue gradient"""
+                """Map OBV value to color using blue-green-yellow-red gradient (red = high/good OBV)"""
                 # Normalize to 0-1 range
                 normalized = (obv_value - OBV_MIN) / (OBV_MAX - OBV_MIN)
                 normalized = max(0, min(1, normalized))  # Clamp to [0, 1]
                 
                 if normalized < 0.33:
-                    # Red to yellow (low OBV)
+                    # Blue to green (low OBV)
                     t = normalized / 0.33
-                    r = int(220)
-                    g = int(50 + t * 150)
-                    b = int(50)
+                    r = int(40 + t * 30)
+                    g = int(150 + t * 50)
+                    b = int(220 - t * 120)
                 elif normalized < 0.66:
-                    # Yellow to green (medium OBV)
+                    # Green to yellow (medium OBV)
                     t = (normalized - 0.33) / 0.33
-                    r = int(220 - t * 150)
+                    r = int(70 + t * 150)
                     g = int(200)
-                    b = int(50 + t * 50)
+                    b = int(100 - t * 50)
                 else:
-                    # Green to blue (high OBV)
+                    # Yellow to red (high OBV - GOOD!)
                     t = (normalized - 0.66) / 0.34
-                    r = int(70 - t * 30)
-                    g = int(200 - t * 50)
-                    b = int(100 + t * 120)
+                    r = int(220)
+                    g = int(200 - t * 150)
+                    b = int(50)
                 
                 return f'rgb({r},{g},{b})'
             
@@ -748,10 +740,10 @@ if events_df is not None and len(events_df) > 0:
                     size=0.1,
                     color=[OBV_MIN],
                     colorscale=[
-                        [0, 'rgb(220,50,50)'],      # Red (negative OBV)
-                        [0.33, 'rgb(220,200,50)'],  # Yellow (low OBV)
-                        [0.66, 'rgb(70,200,100)'],  # Green (medium OBV)
-                        [1, 'rgb(40,150,220)']      # Blue (high OBV)
+                        [0, 'rgb(40,150,220)'],      # Blue (negative/low OBV)
+                        [0.33, 'rgb(70,200,100)'],   # Green (low-medium OBV)
+                        [0.66, 'rgb(220,200,50)'],   # Yellow (medium OBV)
+                        [1, 'rgb(220,50,50)']        # Red (high/positive OBV - GOOD!)
                     ],
                     cmin=OBV_MIN,
                     cmax=OBV_MAX,
@@ -831,12 +823,12 @@ if events_df is not None and len(events_df) > 0:
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <div style="display: flex; align-items: center; gap: 4px;">
-                        <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: rgb(220,50,50); border: 1px solid #ccc;"></span>
-                        <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: rgb(220,200,50); border: 1px solid #ccc;"></span>
-                        <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: rgb(70,200,100); border: 1px solid #ccc;"></span>
                         <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: rgb(40,150,220); border: 1px solid #ccc;"></span>
+                        <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: rgb(70,200,100); border: 1px solid #ccc;"></span>
+                        <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: rgb(220,200,50); border: 1px solid #ccc;"></span>
+                        <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: rgb(220,50,50); border: 1px solid #ccc;"></span>
                     </div>
-                    <span style="font-size: 0.75em; color: #555;">-0.05 → 0.23+ OBV</span>
+                    <span style="font-size: 0.75em; color: #555;">-0.05 → 0.23+ OBV (red = better)</span>
                 </div>
             </div>
             """,
@@ -1148,28 +1140,35 @@ def create_pdf_report():
         alignment=TA_CENTER,
     )
     
-    # Combine all metrics from all categories
-    all_metrics = []
-    for category, category_metrics in metrics.items():
-        all_metrics.extend(category_metrics)
+    # Use the all_metrics list directly (defined earlier in the file)
+    # Update table headers based on which team is Ujpest
+    home_header_pdf = f"{home_team}" + (" (vs avg)" if is_home_ujpest else "")
+    away_header_pdf = f"{away_team}" + (" (vs avg)" if is_away_ujpest else "")
     
-    table_data = [["Statistic", f"{home_team} (vs avg)", f"{away_team} (vs avg)"]]
+    table_data = [["Statistic", home_header_pdf, away_header_pdf]]
     for metric_info in all_metrics:
         metric_name = metric_info[0]
         metric_col = metric_info[1]
-        is_percentage = len(metric_info) > 2 and metric_info[2]
+        is_percentage = metric_info[2]
+        show_season_comparison = metric_info[3]
         
-        # Get season averages for both teams
-        home_season_avg = get_season_avg(home_team, metric_col)
-        away_season_avg = get_season_avg(away_team, metric_col)
+        # Determine if we should show season comparison for each team
+        home_show_diff = show_season_comparison and is_home_ujpest
+        away_show_diff = show_season_comparison and is_away_ujpest
+        
+        # Get season averages
+        home_season_avg = get_season_avg(home_team, metric_col) if home_show_diff else None
+        away_season_avg = get_season_avg(away_team, metric_col) if away_show_diff else None
         
         # Use ReportLab markup for colored text
-        home_value = format_value_with_diff(row_home[metric_col], home_season_avg, is_percentage, use_reportlab=True)
-        away_value = format_value_with_diff(row_away[metric_col], away_season_avg, is_percentage, use_reportlab=True)
+        home_value = format_value_with_diff(row_home[metric_col], home_season_avg, is_percentage, show_diff=home_show_diff, use_reportlab=True)
+        away_value = format_value_with_diff(row_away[metric_col], away_season_avg, is_percentage, show_diff=away_show_diff, use_reportlab=True)
         
-        # Wrap in Paragraph to render the color markup
+        # Wrap in Paragraph to render the color markup (includes bold formatting)
+        # Bold the metric name
+        bold_metric_name = f"<b>{metric_name}</b>"
         table_data.append([
-            metric_name, 
+            Paragraph(bold_metric_name, cell_style), 
             Paragraph(home_value, cell_style), 
             Paragraph(away_value, cell_style)
         ])
