@@ -16,4 +16,5 @@ dependencies = [
     "reportlab>=4.4.9",
     "kaleido>=1.2.0",
     "pillow>=12.1.0",
+    "skillcorner>=2.6.12",
 ]
