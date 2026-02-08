@@ -304,17 +304,18 @@ events_df = load_events_data(selected_match_date)
 # -------------------------
 # Tuple format: (Display Name, Column Name, Is Percentage?, Season Comparison Enabled?)
 # Season comparison is only enabled for Ujpest
+# Tuple format: (Display Name, Column Name, Is Percentage?, Season Comparison Enabled?, Lower is Better?)
 all_metrics = [
-    ("Goals", "team_match_goals", False, False),
-    ("xG (Non Penalty)", "team_match_np_xg", False, True),
-    ("xG Conceded", "team_match_np_xg_conceded", False, True),
-    ("Shots", "team_match_np_shots", False, True),
-    ("Touches in Opp. Box", "team_touches_in_opp_box", False, True),
-    ("Crosses into Box", "team_match_crosses_into_box", False, True),
-    ("Final 3rd Forward Passes", "team_match_f3_forward_passes", False, True),
-    ("Possession %", "team_match_possession", True, True),
-    ("Passes per Possession", "passes_per_possession", False, True),
-    ("PPDA", "team_match_ppda", False, True),
+    ("Goals", "team_match_goals", False, False, False),
+    ("xG (Non Penalty)", "team_match_np_xg", False, True, False),
+    ("xG Conceded", "team_match_np_xg_conceded", False, True, True),  # Lower is better
+    ("Shots", "team_match_np_shots", False, True, False),
+    ("Touches in Opp. Box", "team_touches_in_opp_box", False, True, False),
+    ("Crosses into Box", "team_match_crosses_into_box", False, True, False),
+    ("Final 3rd Forward Passes", "team_match_f3_forward_passes", False, True, False),
+    ("Possession %", "team_match_possession", True, True, False),
+    ("Passes per Possession", "passes_per_possession", False, True, False),
+    ("PPDA", "team_match_ppda", False, True, True),  # Lower is better
 ]
 
 # Map match columns to season columns
@@ -412,7 +413,7 @@ def format_value(value, is_percentage=False):
         return f"{value:.2f}"
     return str(int(value))
 
-def format_value_with_diff(value, season_avg, is_percentage=False, show_diff=True, use_html=False, use_reportlab=False):
+def format_value_with_diff(value, season_avg, is_percentage=False, show_diff=True, use_html=False, use_reportlab=False, lower_is_better=False):
     """Format values for display with difference from season average
     
     Args:
@@ -422,6 +423,7 @@ def format_value_with_diff(value, season_avg, is_percentage=False, show_diff=Tru
         show_diff: Whether to show the difference (only True for Ujpest)
         use_html: If True, return HTML with color styling (for Streamlit)
         use_reportlab: If True, return ReportLab-compatible markup (for PDF)
+        lower_is_better: If True, invert color logic (green for negative diff, red for positive)
     """
     if pd.isna(value):
         return "-"
@@ -455,14 +457,24 @@ def format_value_with_diff(value, season_avg, is_percentage=False, show_diff=Tru
     else:
         diff_str = f"{diff:+.0f}"
     
-    # Color code: green for positive (better), red for negative (worse)
-    # For most stats, higher is better (except xG conceded and PPDA where lower is better)
-    if diff > 0.001:  # Small threshold to avoid floating point issues
-        color = "#28a745"  # Green - better than average
-    elif diff < -0.001:
-        color = "#dc3545"  # Red - worse than average
+    # Color code: green for better, red for worse
+    # For most stats, higher is better. For lower_is_better stats (xG conceded, PPDA), invert the logic
+    if lower_is_better:
+        # Lower is better: negative diff = green (better), positive diff = red (worse)
+        if diff < -0.001:
+            color = "#28a745"  # Green - better than average
+        elif diff > 0.001:
+            color = "#dc3545"  # Red - worse than average
+        else:
+            color = "#6c757d"  # Gray - same as average
     else:
-        color = "#6c757d"  # Gray - same as average
+        # Higher is better: positive diff = green (better), negative diff = red (worse)
+        if diff > 0.001:
+            color = "#28a745"  # Green - better than average
+        elif diff < -0.001:
+            color = "#dc3545"  # Red - worse than average
+        else:
+            color = "#6c757d"  # Gray - same as average
     
     if use_html:
         return f'{main_value} <span style="color:{color}">({diff_str})</span>'
@@ -487,6 +499,7 @@ for i, metric_info in enumerate(all_metrics):
     metric_col = metric_info[1]
     is_percentage = metric_info[2]
     show_season_comparison = metric_info[3]
+    lower_is_better = metric_info[4]
     
     # Determine if we should show season comparison for each team
     home_show_diff = show_season_comparison and is_home_ujpest
@@ -496,8 +509,8 @@ for i, metric_info in enumerate(all_metrics):
     home_season_avg = get_season_avg(home_team, metric_col) if home_show_diff else None
     away_season_avg = get_season_avg(away_team, metric_col) if away_show_diff else None
     
-    home_value = format_value_with_diff(row_home[metric_col], home_season_avg, is_percentage, show_diff=home_show_diff, use_html=True)
-    away_value = format_value_with_diff(row_away[metric_col], away_season_avg, is_percentage, show_diff=away_show_diff, use_html=True)
+    home_value = format_value_with_diff(row_home[metric_col], home_season_avg, is_percentage, show_diff=home_show_diff, use_html=True, lower_is_better=lower_is_better)
+    away_value = format_value_with_diff(row_away[metric_col], away_season_avg, is_percentage, show_diff=away_show_diff, use_html=True, lower_is_better=lower_is_better)
     
     # Alternate row background
     row_bg = "#F8F9FA" if i % 2 == 1 else "white"
@@ -1124,6 +1137,7 @@ def create_pdf_report():
         metric_col = metric_info[1]
         is_percentage = metric_info[2]
         show_season_comparison = metric_info[3]
+        lower_is_better = metric_info[4]
         
         # Determine if we should show season comparison for each team
         home_show_diff = show_season_comparison and is_home_ujpest
@@ -1134,8 +1148,8 @@ def create_pdf_report():
         away_season_avg = get_season_avg(away_team, metric_col) if away_show_diff else None
         
         # Use ReportLab markup for colored text
-        home_value = format_value_with_diff(row_home[metric_col], home_season_avg, is_percentage, show_diff=home_show_diff, use_reportlab=True)
-        away_value = format_value_with_diff(row_away[metric_col], away_season_avg, is_percentage, show_diff=away_show_diff, use_reportlab=True)
+        home_value = format_value_with_diff(row_home[metric_col], home_season_avg, is_percentage, show_diff=home_show_diff, use_reportlab=True, lower_is_better=lower_is_better)
+        away_value = format_value_with_diff(row_away[metric_col], away_season_avg, is_percentage, show_diff=away_show_diff, use_reportlab=True, lower_is_better=lower_is_better)
         
         # Wrap in Paragraph to render the color markup (includes bold formatting)
         # Bold the metric name
