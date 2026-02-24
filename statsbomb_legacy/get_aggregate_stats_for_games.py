@@ -23,6 +23,10 @@ for match_folder in mathces_folders:
         "team_match_f3_forward_passes": [ujpest_match_op_f3_passes, opponent_match_op_f3_passes],
     })
     match_stats_df = pd.read_csv(f"matches/{match_folder}/team_match_stats.csv")
+    # Drop columns from previous runs to allow clean re-merge
+    enriched_cols = ["match_date", "team_touches_in_opp_box", "team_match_op_f3_passes",
+                     "team_match_f3_forward_passes", "possession_count", "passes_per_possession"]
+    match_stats_df = match_stats_df.drop(columns=[c for c in enriched_cols if c in match_stats_df.columns], errors="ignore")
     match_stats_df = pd.merge(match_stats_df, df, on="team_name", how="left")
     match_events = pd.read_csv(f"matches/{match_folder}/events.csv")
     possession_counts = (
@@ -39,3 +43,25 @@ for match_folder in mathces_folders:
 
 
     match_stats_df.to_csv(f"matches/{match_folder}/team_match_stats.csv")
+
+# Compute per-team touches inside box per game (same logic as match: sum raw player touches, then per game)
+player_season_stats = pd.read_csv("seasonal_stats/player_season_stats.csv")
+team_season_stats = pd.read_csv("seasonal_stats/team_season_stats.csv")
+
+# Convert per-90 rate back to raw season totals, then sum per team
+player_season_stats["_raw_touches"] = (
+    player_season_stats["player_season_touches_inside_box_90"]
+    * player_season_stats["player_season_minutes"] / 90
+)
+total_touches_by_team = player_season_stats.groupby("team_name")["_raw_touches"].sum()
+
+# Divide by number of matches to get per-game average (comparable to match totals)
+matches_by_team = team_season_stats.set_index("team_name")["team_season_matches"]
+avg_touches_by_team = (total_touches_by_team / matches_by_team).rename("team_season_avg_touches_inside_box_90")
+# Drop column if it already exists to avoid duplicates on re-run
+if "team_season_avg_touches_inside_box_90" in team_season_stats.columns:
+    team_season_stats = team_season_stats.drop(columns=["team_season_avg_touches_inside_box_90"])
+team_season_stats = team_season_stats.merge(
+    avg_touches_by_team, on="team_name", how="left"
+)
+team_season_stats.to_csv("seasonal_stats/team_season_stats.csv", index=False)

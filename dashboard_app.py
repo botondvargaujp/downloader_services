@@ -67,7 +67,13 @@ def load_data():
 @st.cache_data
 def load_team_season_stats():
     """Load team season stats for comparison"""
-    # Look for team_season_stats_*.csv in match_data folder
+    # First try seasonal_stats folder (has computed avg touches column)
+    seasonal_path = os.path.join(os.path.dirname(__file__), "seasonal_stats", "team_season_stats.csv")
+    if os.path.exists(seasonal_path):
+        df = pd.read_csv(seasonal_path)
+        return df
+    
+    # Fallback: look for team_season_stats_*.csv in match_data folder
     data_path = os.path.join(os.path.dirname(__file__), "match_data", "team_season_stats_*.csv")
     csv_files = glob.glob(data_path)
     
@@ -323,7 +329,7 @@ MATCH_TO_SEASON_STAT_MAP = {
     "team_match_np_xg": "team_season_np_xg_pg",
     "team_match_np_xg_conceded": "team_season_np_xg_conceded_pg",
     "team_match_np_shots": "team_season_np_shots_pg",
-    "team_touches_in_opp_box": None,  # Not available in season stats
+    "team_touches_in_opp_box": "team_season_avg_touches_inside_box_90",
     "team_match_crosses_into_box": "team_season_crosses_into_box_pg",
     "team_match_f3_forward_passes": None,  # Not available in season stats
     "team_match_possession": "team_season_possession",
