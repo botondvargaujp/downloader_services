@@ -1019,51 +1019,20 @@ if events_df is not None and len(events_df) > 0:
             showlegend=True
         ))
     
-    add_goal_markers(goals, home_team, home_color, series_home)
-    add_goal_markers(goals, away_team, away_color, series_away)
-    
-    # Add own goal markers (shown on the BENEFITING team's line)
+    # Combine regular goals and own goals (credited to the benefiting team)
     own_goals_for = events_df[events_df["type"] == "Own Goal For"].copy()
     if len(own_goals_for) > 0:
         own_goals_for["time"] = own_goals_for["minute"] + own_goals_for["second"].fillna(0) / 60
-        
-        for benefiting_team, color, series_data in [
-            (home_team, home_color, series_home),
-            (away_team, away_color, series_away),
-        ]:
-            team_og = own_goals_for[own_goals_for["team"] == benefiting_team]
-            if len(team_og) == 0:
-                continue
-            
-            og_y_values = []
-            for _, og in team_og.iterrows():
-                og_time = og["time"]
-                cum_xg_at_time = (
-                    series_data[series_data["time"] <= og_time]["cum_xg"].iloc[-1]
-                    if len(series_data[series_data["time"] <= og_time]) > 0
-                    else 0
-                )
-                og_y_values.append(cum_xg_at_time)
-            
-            fig_xg.add_trace(go.Scatter(
-                x=team_og["time"],
-                y=og_y_values,
-                mode="markers",
-                name=f"{benefiting_team} Own Goals",
-                marker=dict(
-                    symbol="star",
-                    size=16,
-                    color=color,
-                    line=dict(width=2, color="red"),
-                ),
-                hovertemplate=(
-                    "<b>OWN GOAL</b><br>"
-                    "Scored by: %{customdata[0]}<br>"
-                    "Minute: %{x:.1f}<extra></extra>"
-                ),
-                customdata=team_og[["player"]].values,
-                showlegend=True,
-            ))
+        # Rename columns to match shot goals structure so we can concat
+        own_goals_for = own_goals_for.rename(columns={"team": "team"})
+        # Use the player column as-is (the player who scored the OG)
+    
+    all_goals = goals.copy()
+    if len(own_goals_for) > 0:
+        all_goals = pd.concat([all_goals, own_goals_for], ignore_index=True)
+    
+    add_goal_markers(all_goals, home_team, home_color, series_home)
+    add_goal_markers(all_goals, away_team, away_color, series_away)
     
     # Layout
     fig_xg.update_layout(
