@@ -10,7 +10,17 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RL
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 import tempfile
+
+# Register a Unicode-capable font for Hungarian characters (ő, ű, etc.)
+_FONT_PATH = "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"
+if os.path.exists(_FONT_PATH):
+    pdfmetrics.registerFont(TTFont("ArialUnicode", _FONT_PATH))
+    _PDF_FONT = "ArialUnicode"
+else:
+    _PDF_FONT = "Helvetica"  # fallback
 from PIL import Image as PILImage
 
 # -------------------------
@@ -295,8 +305,14 @@ else:
     home_team = teams[0]
     away_team = teams[0]
 
-row_home = match_df[match_df["team_name"] == home_team].iloc[0]
-row_away = match_df[match_df["team_name"] == away_team].iloc[0]
+row_home = match_df[match_df["team_name"] == home_team].iloc[0].copy()
+row_away = match_df[match_df["team_name"] == away_team].iloc[0].copy()
+
+# Compute actual goals (including opposition own goals that count in your favor)
+_home_opp_og = row_home.get('team_match_opposition_own_goals', 0)
+_away_opp_og = row_away.get('team_match_opposition_own_goals', 0)
+row_home['team_actual_goals'] = int(row_home['team_match_goals']) + int(_home_opp_og if pd.notna(_home_opp_og) else 0)
+row_away['team_actual_goals'] = int(row_away['team_match_goals']) + int(_away_opp_og if pd.notna(_away_opp_og) else 0)
 
 # Determine which team is Ujpest for coloring
 is_home_ujpest = home_team == "Ujpest"
@@ -312,7 +328,7 @@ events_df = load_events_data(selected_match_date)
 # Season comparison is only enabled for Ujpest
 # Tuple format: (Display Name, Column Name, Is Percentage?, Season Comparison Enabled?, Lower is Better?)
 all_metrics = [
-    ("Goals", "team_match_goals", False, False, False),
+    ("Goals", "team_actual_goals", False, False, False),
     ("xG (Non Penalty)", "team_match_np_xg", False, True, False),
     ("xG Conceded", "team_match_np_xg_conceded", False, True, True),  # Lower is better
     ("Shots", "team_match_np_shots", False, True, False),
@@ -383,7 +399,7 @@ with col2:
         f"""
         <div style="text-align: center; padding: 5px;">
             <div style="color: {UJPEST_COLOR if (is_home_ujpest or is_away_ujpest) else '#2C3E50'}; margin: 0; font-size: 1.8em; font-weight: bold;">
-                {int(row_home['team_match_goals'])} - {int(row_away['team_match_goals'])}
+                {int(row_home['team_actual_goals'])} - {int(row_away['team_actual_goals'])}
             </div>
         </div>
         """,
@@ -992,6 +1008,49 @@ if events_df is not None and len(events_df) > 0:
     add_goal_markers(goals, home_team, home_color, series_home)
     add_goal_markers(goals, away_team, away_color, series_away)
     
+    # Add own goal markers (shown on the BENEFITING team's line)
+    own_goals_for = events_df[events_df["type"] == "Own Goal For"].copy()
+    if len(own_goals_for) > 0:
+        own_goals_for["time"] = own_goals_for["minute"] + own_goals_for["second"].fillna(0) / 60
+        
+        for benefiting_team, color, series_data in [
+            (home_team, home_color, series_home),
+            (away_team, away_color, series_away),
+        ]:
+            team_og = own_goals_for[own_goals_for["team"] == benefiting_team]
+            if len(team_og) == 0:
+                continue
+            
+            og_y_values = []
+            for _, og in team_og.iterrows():
+                og_time = og["time"]
+                cum_xg_at_time = (
+                    series_data[series_data["time"] <= og_time]["cum_xg"].iloc[-1]
+                    if len(series_data[series_data["time"] <= og_time]) > 0
+                    else 0
+                )
+                og_y_values.append(cum_xg_at_time)
+            
+            fig_xg.add_trace(go.Scatter(
+                x=team_og["time"],
+                y=og_y_values,
+                mode="markers",
+                name=f"{benefiting_team} Own Goals",
+                marker=dict(
+                    symbol="star",
+                    size=16,
+                    color=color,
+                    line=dict(width=2, color="red"),
+                ),
+                hovertemplate=(
+                    "<b>OWN GOAL</b><br>"
+                    "Scored by: %{customdata[0]}<br>"
+                    "Minute: %{x:.1f}<extra></extra>"
+                ),
+                customdata=team_og[["player"]].values,
+                showlegend=True,
+            ))
+    
     # Layout
     fig_xg.update_layout(
         xaxis=dict(
@@ -1065,7 +1124,7 @@ def create_pdf_report():
         textColor=colors.HexColor(header_color),
         spaceAfter=6,
         alignment=TA_CENTER,
-        fontName='Helvetica-Bold'
+        fontName=_PDF_FONT
     )
     
     subtitle_style = ParagraphStyle(
@@ -1075,6 +1134,7 @@ def create_pdf_report():
         textColor=colors.grey,
         spaceAfter=12,
         alignment=TA_CENTER,
+        fontName=_PDF_FONT,
     )
     
     section_style = ParagraphStyle(
@@ -1084,7 +1144,7 @@ def create_pdf_report():
         textColor=colors.HexColor(header_color),
         spaceAfter=6,
         spaceBefore=10,
-        fontName='Helvetica-Bold'
+        fontName=_PDF_FONT
     )
     
     # Title
@@ -1092,7 +1152,7 @@ def create_pdf_report():
     elements.append(Paragraph(f"{row_home['competition_name']} | {row_home['season_name']}", subtitle_style))
     
     # Scoreline
-    score_text = f"<font size=16><b>{int(row_home['team_match_goals'])} - {int(row_away['team_match_goals'])}</b></font>"
+    score_text = f"<font size=16><b>{int(row_home['team_actual_goals'])} - {int(row_away['team_actual_goals'])}</b></font>"
     elements.append(Paragraph(score_text, subtitle_style))
     elements.append(Spacer(1, 0.1*inch))
     
@@ -1110,7 +1170,8 @@ def create_pdf_report():
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(header_color)),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 0), (-1, 0), _PDF_FONT),
+        ('FONTNAME', (0, 1), (-1, -1), _PDF_FONT),
         ('FONTSIZE', (0, 0), (-1, 0), 11),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
         ('TOPPADDING', (0, 0), (-1, 0), 8),
@@ -1130,6 +1191,7 @@ def create_pdf_report():
         parent=styles['Normal'],
         fontSize=9,
         alignment=TA_CENTER,
+        fontName=_PDF_FONT,
     )
     
     # Use the all_metrics list directly (defined earlier in the file)
@@ -1172,7 +1234,8 @@ def create_pdf_report():
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
         ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 0), (-1, 0), _PDF_FONT),
+        ('FONTNAME', (0, 1), (-1, -1), _PDF_FONT),
         ('FONTSIZE', (0, 0), (-1, -1), 9),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
         ('TOPPADDING', (0, 0), (-1, -1), 4),
@@ -1192,6 +1255,7 @@ def create_pdf_report():
             spaceBefore=4,
             spaceAfter=4,
             leading=14,
+            fontName=_PDF_FONT,
         )
         elements.append(Paragraph(stats_analysis, analysis_style))
     
@@ -1270,6 +1334,7 @@ def create_pdf_report():
                         spaceBefore=4,
                         spaceAfter=4,
                         leading=14,
+                        fontName=_PDF_FONT,
                     )
                     elements.append(Paragraph(passmap_analysis, analysis_style))
                     
@@ -1282,6 +1347,7 @@ def create_pdf_report():
                     textColor=colors.grey,
                     alignment=TA_CENTER,
                     spaceAfter=12,
+                    fontName=_PDF_FONT,
                 )
                 elements.append(Paragraph(
                     "Pass network maps could not be exported to PDF.",
@@ -1321,6 +1387,7 @@ def create_pdf_report():
                 textColor=colors.grey,
                 alignment=TA_CENTER,
                 spaceAfter=12,
+                fontName=_PDF_FONT,
             )
             elements.append(Paragraph(
                 "xG Race chart could not be exported to PDF. Please view it in the dashboard.",
@@ -1341,6 +1408,7 @@ def create_pdf_report():
                 spaceBefore=4,
                 spaceAfter=4,
                 leading=14,
+                fontName=_PDF_FONT,
             )
             elements.append(Paragraph(xg_analysis, analysis_style))
     
@@ -1352,6 +1420,7 @@ def create_pdf_report():
         fontSize=8,
         textColor=colors.grey,
         alignment=TA_CENTER,
+        fontName=_PDF_FONT,
     )
     elements.append(Paragraph("Match Report Dashboard | Powered by StatsBomb Data", footer_style))
     

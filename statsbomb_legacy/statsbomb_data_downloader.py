@@ -48,5 +48,17 @@ for idx,row in matches.iterrows():
 team_season_stats = sb.team_season_stats(competition_id=nb1, season_id=season_nb1_25_26, creds=creds)
 player_season_stats = sb.player_season_stats(competition_id=nb1, season_id=season_nb1_25_26, creds=creds)
 
+# Compute per-team average of player_season_touches_inside_box_90
+avg_touches_by_team = (
+    player_season_stats
+    .groupby("team_name")["player_season_touches_inside_box_90"]
+    .mean()
+    .rename("team_season_avg_touches_inside_box_90")
+)
+print(avg_touches_by_team.columns)
+team_season_stats = team_season_stats.merge(
+    avg_touches_by_team, on="team_name", how="left"
+)
+print(team_season_stats.columns)
 team_season_stats.to_csv(f"seasonal_stats/team_season_stats.csv", index=False)
 player_season_stats.to_csv(f"seasonal_stats/player_season_stats.csv", index=False)
