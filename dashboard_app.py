@@ -14,25 +14,23 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 import tempfile
 
-# Register a Unicode-capable font for Hungarian characters (ő, ű, etc.)
-# We must register regular + bold + italic variants AND a font family so that
-# ReportLab <b>/<i> tags stay in the same Unicode font instead of falling back
-# to Helvetica (which cannot render ő, ű, etc.).
-_FONT_PATH = "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"
+# -------------------------
+# FONT SETUP (Unicode Safe)
+# -------------------------
+# Bundled DejaVuSans.ttf supports full Unicode (ő, ű, etc.)
+# Works locally AND in cloud (no OS font dependency).
+_FONT_PATH = os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans.ttf")
 if os.path.exists(_FONT_PATH):
-    pdfmetrics.registerFont(TTFont("ArialUnicode", _FONT_PATH))
-    pdfmetrics.registerFont(TTFont("ArialUnicode-Bold", _FONT_PATH))
-    pdfmetrics.registerFont(TTFont("ArialUnicode-Italic", _FONT_PATH))
-    pdfmetrics.registerFont(TTFont("ArialUnicode-BoldItalic", _FONT_PATH))
+    pdfmetrics.registerFont(TTFont("DejaVuSans", _FONT_PATH))
     from reportlab.pdfbase.pdfmetrics import registerFontFamily
     registerFontFamily(
-        "ArialUnicode",
-        normal="ArialUnicode",
-        bold="ArialUnicode-Bold",
-        italic="ArialUnicode-Italic",
-        boldItalic="ArialUnicode-BoldItalic",
+        "DejaVuSans",
+        normal="DejaVuSans",
+        bold="DejaVuSans",
+        italic="DejaVuSans",
+        boldItalic="DejaVuSans",
     )
-    _PDF_FONT = "ArialUnicode"
+    _PDF_FONT = "DejaVuSans"
 else:
     _PDF_FONT = "Helvetica"  # fallback
 from PIL import Image as PILImage
