@@ -5,7 +5,11 @@
 All API calls require credentials passed as a dictionary:
 
 ```python
-CREDS = {"user": "botond.varga.ujp@gmail.com", "passwd": "AYHQhWwK"}
+import os
+from dotenv import load_dotenv
+
+load_dotenv()  # reads credentials from a git-ignored .env (see .env.example)
+CREDS = {"user": os.environ["STATSBOMB_USER"], "passwd": os.environ["STATSBOMB_PASSWD"]}
 ```
 
 These credentials are used with the `statsbombpy` Python library (not raw HTTP requests). Install it with:
@@ -442,7 +446,11 @@ team_season = sb.team_season_stats(competition_id=42, season_id=318, creds=CREDS
 ```python
 from statsbombpy import sb
 
-CREDS = {"user": "botond.varga.ujp@gmail.com", "passwd": "AYHQhWwK"}
+import os
+from dotenv import load_dotenv
+
+load_dotenv()  # reads credentials from a git-ignored .env (see .env.example)
+CREDS = {"user": os.environ["STATSBOMB_USER"], "passwd": os.environ["STATSBOMB_PASSWD"]}
 
 # 1. Find competitions and seasons
 comps = sb.competitions(creds=CREDS)

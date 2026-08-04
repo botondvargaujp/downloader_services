@@ -13,6 +13,10 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 import tempfile
+from dotenv import load_dotenv
+
+# Load StatsBomb credentials from a git-ignored .env (see .env.example).
+load_dotenv()
 
 # -------------------------
 # FONT SETUP (Unicode Safe)
@@ -209,7 +213,7 @@ def get_match_dates():
     """Fetch match dates from StatsBomb API"""
     try:
         from statsbombpy import sb
-        creds = {"user": "botond.varga.ujp@gmail.com", "passwd": "AYHQhWwK"}
+        creds = {"user": os.environ["STATSBOMB_USER"], "passwd": os.environ["STATSBOMB_PASSWD"]}
         season_id = 318
         competition_id = 1522
         
