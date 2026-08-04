@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ujpest.statsbomb</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/botondvarga/downloader_services/.venv/bin/python</string>
+        <string>/Users/botondvarga/downloader_services/statsbomb_legacy/run_pipeline.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/botondvarga/downloader_services</string>
+
+    <!-- Run every Sunday (Weekday 0) and Monday (Weekday 1) at 10:00 local time.
+         If the Mac is asleep/off at that time, launchd runs the job when it next wakes. -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Weekday</key><integer>0</integer>
+            <key>Hour</key><integer>10</integer>
+            <key>Minute</key><integer>0</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>1</integer>
+            <key>Hour</key><integer>10</integer>
+            <key>Minute</key><integer>0</integer>
+        </dict>
+    </array>
+
+    <!-- Credentials are read from the git-ignored .env at the repo root (see .env.example).
+         No secrets are stored in this plist. -->
+
+    <key>StandardOutPath</key>
+    <string>/Users/botondvarga/downloader_services/statsbomb_legacy/logs/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/botondvarga/downloader_services/statsbomb_legacy/logs/launchd.err.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
