@@ -47,6 +47,10 @@ st.set_page_config(
     layout="wide",
 )
 
+# Only matches from this season are shown. Bump when a new season starts
+# (folders from older seasons can stay in matches/ - they're filtered out).
+CURRENT_SEASON_ID = 351  # NB I 2026/2027
+
 # Ujpest colors (our team)
 UJPEST_COLOR = "#6A0DAD"  # Purple
 UJPEST_LIGHT = "#9B4FD4"  # Lighter purple
@@ -83,6 +87,12 @@ def load_data():
     # Combine all dataframes
     if dfs:
         combined_df = pd.concat(dfs, ignore_index=True)
+        # Drop matches from previous seasons
+        if "season_id" in combined_df.columns:
+            combined_df = combined_df[combined_df["season_id"] == CURRENT_SEASON_ID].reset_index(drop=True)
+        if combined_df.empty:
+            st.error(f"No match data found for season_id {CURRENT_SEASON_ID}")
+            return combined_df
         # Ensure match_date is unique per match
         print(f"Loaded {len(combined_df)} rows from {combined_df['match_date'].nunique()} unique matches")
         return combined_df
