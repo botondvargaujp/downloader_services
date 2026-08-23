@@ -3,12 +3,10 @@ import pandas as pd
 import plotly.graph_objects as go
 import glob
 import os
-import re
 from io import BytesIO
-from xml.sax.saxutils import escape as xml_escape
 from reportlab.lib.pagesizes import A4, letter, landscape
 from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, Table, TableStyle, PageBreak, ListFlowable, ListItem
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, Table, TableStyle, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
@@ -25,29 +23,17 @@ load_dotenv()
 # -------------------------
 # Bundled DejaVuSans.ttf supports full Unicode (ő, ű, etc.)
 # Works locally AND in cloud (no OS font dependency).
-_FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
-_FONT_PATH = os.path.join(_FONT_DIR, "DejaVuSans.ttf")
+_FONT_PATH = os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans.ttf")
 if os.path.exists(_FONT_PATH):
     pdfmetrics.registerFont(TTFont("DejaVuSans", _FONT_PATH))
     from reportlab.pdfbase.pdfmetrics import registerFontFamily
-
-    # Bold / italic faces so <b> and <i> in the analysis text actually render.
-    # Any face that is missing falls back to the regular one.
-    _FACES = {
-        "bold": ("DejaVuSans-Bold", "DejaVuSans-Bold.ttf"),
-        "italic": ("DejaVuSans-Oblique", "DejaVuSans-Oblique.ttf"),
-        "boldItalic": ("DejaVuSans-BoldOblique", "DejaVuSans-BoldOblique.ttf"),
-    }
-    _family = {"normal": "DejaVuSans"}
-    for _style, (_face_name, _file_name) in _FACES.items():
-        _face_path = os.path.join(_FONT_DIR, _file_name)
-        if os.path.exists(_face_path):
-            pdfmetrics.registerFont(TTFont(_face_name, _face_path))
-            _family[_style] = _face_name
-        else:
-            _family[_style] = "DejaVuSans"
-
-    registerFontFamily("DejaVuSans", **_family)
+    registerFontFamily(
+        "DejaVuSans",
+        normal="DejaVuSans",
+        bold="DejaVuSans",
+        italic="DejaVuSans",
+        boldItalic="DejaVuSans",
+    )
     _PDF_FONT = "DejaVuSans"
 else:
     _PDF_FONT = "Helvetica"  # fallback
@@ -74,195 +60,6 @@ OPPOSITION_COLOR = "#95A5A6"  # Gray
 OPPOSITION_LIGHT = "#BDC3C7"  # Light gray
 
 BACKGROUND_LIGHT = "#F8F9FA"
-
-# -------------------------
-# ANALYSIS TEXT EDITOR (Markdown in, same look on panel & in PDF)
-# -------------------------
-# Analysis boxes accept lightweight Markdown. The panel preview is rendered by
-# Streamlit's Markdown renderer, and the PDF uses the converter below, so both
-# outputs show the same bold / italic / bullets / headings.
-
-_BULLET_RE = re.compile(r'^(\s*)[-*+]\s+(.*)$')
-_ORDERED_RE = re.compile(r'^(\s*)\d+[.)]\s+(.*)$')
-_HEADING_RE = re.compile(r'^(#{1,4})\s+(.*)$')
-
-
-def _inline_markdown_to_rl(text):
-    """Convert inline Markdown (bold/italic/underline/strike/code) to ReportLab markup."""
-    out = xml_escape(text)
-    # Allow explicit <u>underline</u> written by the user (Streamlit renders it too)
-    out = out.replace('&lt;u&gt;', '<u>').replace('&lt;/u&gt;', '</u>')
-    out = re.sub(r'\*\*\*(.+?)\*\*\*', r'<b><i>\1</i></b>', out, flags=re.S)
-    out = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', out, flags=re.S)
-    out = re.sub(r'__(.+?)__', r'<b>\1</b>', out, flags=re.S)
-    out = re.sub(r'~~(.+?)~~', r'<strike>\1</strike>', out, flags=re.S)
-    out = re.sub(r'(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])', r'<i>\1</i>', out, flags=re.S)
-    out = re.sub(r'(?<![\w_])_(?!\s)(.+?)(?<!\s)_(?![\w_])', r'<i>\1</i>', out, flags=re.S)
-    out = re.sub(r'`(.+?)`', r'<font face="Courier">\1</font>', out, flags=re.S)
-    return out
-
-
-def _indent_level(whitespace):
-    """Nesting depth of a list item (2 spaces or 1 tab per level)."""
-    return len(whitespace.replace('\t', '  ')) // 2
-
-
-def _list_items_to_flowable(items, ordered, style):
-    """Build a (possibly nested) ListFlowable from (level, text) tuples."""
-    entries = []
-    idx = 0
-    base_level = items[0][0]
-    while idx < len(items):
-        level, text = items[idx]
-        para = Paragraph(_inline_markdown_to_rl(text), style)
-
-        # Everything more indented than this item belongs to its sub-list
-        children = []
-        nxt = idx + 1
-        while nxt < len(items) and items[nxt][0] > level:
-            children.append(items[nxt])
-            nxt += 1
-
-        if children:
-            entries.append(ListItem([para, _list_items_to_flowable(children, ordered, style)]))
-        else:
-            entries.append(ListItem(para))
-        idx = nxt
-
-    kwargs = dict(
-        bulletFontName=_PDF_FONT,
-        bulletFontSize=style.fontSize,
-        leftIndent=18,
-        spaceBefore=2,
-        spaceAfter=2,
-    )
-    if ordered:
-        return ListFlowable(entries, bulletType='1', bulletFormat='%s.', **kwargs)
-    # Alternate the glyph for nested levels, like most editors do
-    return ListFlowable(entries, bulletType='bullet', start='•' if base_level == 0 else '◦', **kwargs)
-
-
-def markdown_to_flowables(md_text, base_style):
-    """Convert an analysis text box (Markdown) into ReportLab flowables."""
-    if not md_text or not md_text.strip():
-        return []
-
-    flowables = []
-    lines = md_text.replace('\r\n', '\n').replace('\r', '\n').split('\n')
-    paragraph_buffer = []
-
-    def flush_paragraph():
-        if paragraph_buffer:
-            flowables.append(Paragraph('<br/>'.join(paragraph_buffer), base_style))
-            paragraph_buffer.clear()
-
-    def collect_list(start, pattern):
-        """Consume consecutive list lines, returning (level, text) items."""
-        items = []
-        i = start
-        while i < len(lines):
-            match = pattern.match(lines[i])
-            if not match:
-                break
-            items.append((_indent_level(match.group(1)), match.group(2)))
-            i += 1
-        return items, i
-
-    i = 0
-    while i < len(lines):
-        raw_line = lines[i]
-        line = raw_line.strip()
-
-        if not line:
-            flush_paragraph()
-            i += 1
-            continue
-
-        heading = _HEADING_RE.match(line)
-        if heading:
-            flush_paragraph()
-            level = len(heading.group(1))
-            heading_style = ParagraphStyle(
-                f'AnalysisHeading{level}',
-                parent=base_style,
-                fontSize=base_style.fontSize + max(5 - level, 1),
-                leading=base_style.leading + max(5 - level, 1),
-                spaceBefore=6,
-                spaceAfter=3,
-            )
-            flowables.append(Paragraph(f"<b>{_inline_markdown_to_rl(heading.group(2))}</b>", heading_style))
-            i += 1
-            continue
-
-        if _BULLET_RE.match(raw_line):
-            flush_paragraph()
-            items, i = collect_list(i, _BULLET_RE)
-            flowables.append(_list_items_to_flowable(items, ordered=False, style=base_style))
-            continue
-
-        if _ORDERED_RE.match(raw_line):
-            flush_paragraph()
-            items, i = collect_list(i, _ORDERED_RE)
-            flowables.append(_list_items_to_flowable(items, ordered=True, style=base_style))
-            continue
-
-        paragraph_buffer.append(_inline_markdown_to_rl(line))
-        i += 1
-
-    flush_paragraph()
-    return flowables
-
-
-# Toolbar snippets: (button label, tooltip, inserted text, needs its own line)
-_FORMAT_BUTTONS = [
-    ("**B**", "Bold", "**bold text**", False),
-    ("*I*", "Italic", "*italic text*", False),
-    ("U̲", "Underline", "<u>underlined text</u>", False),
-    ("~~S~~", "Strikethrough", "~~struck text~~", False),
-    ("• List", "Bullet point", "- ", True),
-    ("1. List", "Numbered point", "1. ", True),
-    ("H", "Heading", "### Heading", True),
-]
-
-
-def analysis_editor(key, placeholder, height=140):
-    """Markdown text box + formatting toolbar + live preview.
-
-    Returns the raw Markdown, which create_pdf_report() renders with
-    markdown_to_flowables() so the PDF matches the preview.
-    """
-    state_key = f"{key}_input"
-    st.session_state.setdefault(state_key, "")
-
-    # Toolbar first: clicking a button appends the snippet before the text area
-    # for this run is created, so the new text shows up immediately.
-    # Last column is an empty spacer so the buttons stay small on wide screens
-    button_cols = st.columns([1, 1, 1, 1, 1.4, 1.6, 1, 6])
-    for col, (label, tooltip, snippet, own_line) in zip(button_cols, _FORMAT_BUTTONS):
-        with col:
-            if st.button(label, key=f"{key}_fmt_{tooltip}", help=tooltip, use_container_width=True):
-                current = st.session_state[state_key]
-                if own_line and current and not current.endswith("\n"):
-                    current += "\n"
-                elif current and not current.endswith((" ", "\n")):
-                    current += " "
-                st.session_state[state_key] = current + snippet
-
-    text = st.text_area(
-        label=key,
-        placeholder=placeholder,
-        height=height,
-        key=state_key,
-        label_visibility="collapsed",
-    )
-
-    if text and text.strip():
-        with st.container(border=True):
-            st.caption("Preview (this is how it appears in the PDF export)")
-            st.markdown(text, unsafe_allow_html=True)
-
-    return text
-
 
 # -------------------------
 # LOAD DATA
@@ -782,10 +579,12 @@ st.markdown(table_html, unsafe_allow_html=True)
 st.markdown("<div style='margin: 10px 0;'></div>", unsafe_allow_html=True)
 
 # Statistics Analysis Text Box
-stats_analysis = analysis_editor(
-    key="stats_analysis",
-    placeholder="Write your statistics analysis here... (**bold**, *italic*, - bullet points)",
+stats_analysis = st.text_area(
+    label="stats_analysis",
+    placeholder="Write your statistics analysis here...",
     height=100,
+    key="stats_analysis_input",
+    label_visibility="collapsed"
 )
 
 # -------------------------
@@ -1077,10 +876,12 @@ else:
 st.markdown("<div style='margin: 10px 0;'></div>", unsafe_allow_html=True)
 
 # Pass Map Analysis Text Box
-passmap_analysis = analysis_editor(
-    key="passmap_analysis",
-    placeholder="Write your pass network analysis here... (**bold**, *italic*, - bullet points)",
+passmap_analysis = st.text_area(
+    label="passmap_analysis",
+    placeholder="Write your pass network analysis here...",
     height=100,
+    key="passmap_analysis_input",
+    label_visibility="collapsed"
 )
 
 # -------------------------
@@ -1278,10 +1079,12 @@ else:
 st.markdown("<div style='margin: 10px 0;'></div>", unsafe_allow_html=True)
 
 # xG Race Chart Analysis Text Box
-xg_analysis = analysis_editor(
-    key="xg_analysis",
-    placeholder="Write your xG analysis here... (**bold**, *italic*, - bullet points)",
+xg_analysis = st.text_area(
+    label="xg_analysis",
+    placeholder="Write your xG analysis here...",
     height=100,
+    key="xg_analysis_input",
+    label_visibility="collapsed"
 )
 
 # -------------------------
@@ -1338,20 +1141,7 @@ def create_pdf_report():
         spaceBefore=10,
         fontName=_PDF_FONT
     )
-
-    # Base style for the analysis text boxes (markdown_to_flowables derives
-    # bullet/heading styles from it, so the PDF mirrors the panel preview)
-    analysis_style = ParagraphStyle(
-        'AnalysisText',
-        parent=styles['Normal'],
-        fontSize=10,
-        textColor=colors.black,
-        spaceBefore=4,
-        spaceAfter=4,
-        leading=14,
-        fontName=_PDF_FONT,
-    )
-
+    
     # Title
     elements.append(Paragraph(f"{home_team} vs {away_team}", title_style))
     elements.append(Paragraph(f"{row_home['competition_name']} | {row_home['season_name']}", subtitle_style))
@@ -1452,7 +1242,17 @@ def create_pdf_report():
     
     # Add statistics analysis if provided (directly after tables, no extra spacing)
     if stats_analysis and stats_analysis.strip():
-        elements.extend(markdown_to_flowables(stats_analysis, analysis_style))
+        analysis_style = ParagraphStyle(
+            'AnalysisText',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.black,
+            spaceBefore=4,
+            spaceAfter=4,
+            leading=14,
+            fontName=_PDF_FONT,
+        )
+        elements.append(Paragraph(stats_analysis, analysis_style))
     
     # Add pass maps if available
     if events_df is not None and len(events_df) > 0:
@@ -1521,7 +1321,17 @@ def create_pdf_report():
                 
                 # Add pass map analysis if provided (directly after maps, no extra spacing)
                 if passmap_analysis and passmap_analysis.strip():
-                    elements.extend(markdown_to_flowables(passmap_analysis, analysis_style))
+                    analysis_style = ParagraphStyle(
+                        'AnalysisText',
+                        parent=styles['Normal'],
+                        fontSize=10,
+                        textColor=colors.black,
+                        spaceBefore=4,
+                        spaceAfter=4,
+                        leading=14,
+                        fontName=_PDF_FONT,
+                    )
+                    elements.append(Paragraph(passmap_analysis, analysis_style))
                     
             except Exception as e:
                 # If pass map export fails, add a note
@@ -1585,7 +1395,17 @@ def create_pdf_report():
         
         # Add xG analysis if provided (directly after chart, no extra spacing)
         if xg_analysis and xg_analysis.strip():
-            elements.extend(markdown_to_flowables(xg_analysis, analysis_style))
+            analysis_style = ParagraphStyle(
+                'AnalysisText',
+                parent=styles['Normal'],
+                fontSize=10,
+                textColor=colors.black,
+                spaceBefore=4,
+                spaceAfter=4,
+                leading=14,
+                fontName=_PDF_FONT,
+            )
+            elements.append(Paragraph(xg_analysis, analysis_style))
     
     # Footer
     elements.append(Spacer(1, 0.1*inch))
